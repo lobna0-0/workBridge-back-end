@@ -1,0 +1,162 @@
+-- Full Supabase Schema for Freelance Platform
+-- Run in Supabase SQL Editor (create missing tables/sequences/FKs)
+
+-- Note: Existing tables (users, projects, etc.) skip if present. Add sequences if missing: CREATE SEQUENCE table_id_seq;
+
+-- Categories & Skills
+CREATE TABLE IF NOT EXISTS public.categories (
+  id integer NOT NULL DEFAULT nextval('categories_id_seq'::regclass),
+  name text NOT NULL,
+  CONSTRAINT categories_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.skills (
+  id integer NOT NULL DEFAULT nextval('skills_id_seq'::regclass),
+  name character varying NOT NULL UNIQUE,
+  CONSTRAINT skills_pkey PRIMARY KEY (id)
+);
+
+-- Junctions
+CREATE TABLE IF NOT EXISTS public.category_skills (
+  category_id integer NOT NULL,
+  skill_id integer NOT NULL,
+  CONSTRAINT category_skills_pkey PRIMARY KEY (category_id, skill_id),
+  CONSTRAINT category_skills_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
+  CONSTRAINT category_skills_skill_id_fkey FOREIGN KEY (skill_id) REFERENCES public.skills(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.user_skills (
+  user_id integer NOT NULL,
+  skill_id integer NOT NULL,
+  CONSTRAINT user_skills_pkey PRIMARY KEY (user_id, skill_id),
+  CONSTRAINT user_skills_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT user_skills_skill_id_fkey FOREIGN KEY (skill_id) REFERENCES public.skills(id)
+);
+
+-- Chat & Files
+CREATE TABLE IF NOT EXISTS public.chat_rooms (
+  id integer NOT NULL DEFAULT nextval('chat_rooms_id_seq'::regclass),
+  project_id integer,
+  client_id integer,
+  freelancer_id integer,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT chat_rooms_pkey PRIMARY KEY (id),
+  CONSTRAINT chat_rooms_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id),
+  CONSTRAINT chat_rooms_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.users(id),
+  CONSTRAINT chat_rooms_freelancer_id_fkey FOREIGN KEY (freelancer_id) REFERENCES public.users(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.project_files (
+  id integer NOT NULL DEFAULT nextval('project_files_id_seq'::regclass),
+  project_id integer,
+  file_url text,
+  uploaded_by integer,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT project_files_pkey PRIMARY KEY (id)
+);
+
+-- Reviews & Reports
+CREATE TABLE IF NOT EXISTS public.reviews (
+  id integer NOT NULL DEFAULT nextval('reviews_id_seq'::regclass),
+  project_id integer,
+  reviewer_id integer,
+  reviewee_id integer,
+  rating numeric,
+  comment text,
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT reviews_pkey PRIMARY KEY (id),
+  CONSTRAINT reviews_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id),
+  CONSTRAINT reviews_reviewer_id_fkey FOREIGN KEY (reviewer_id) REFERENCES public.users(id),
+  CONSTRAINT reviews_reviewee_id_fkey FOREIGN KEY (reviewee_id) REFERENCES public.users(id),
+  CONSTRAINT reviews_unique_per_project_reviewer_reviewee UNIQUE (project_id, reviewer_id, reviewee_id)
+);
+
+
+-- Update submissions (add if missing)
+ALTER TABLE public.submissions ADD COLUMN IF NOT EXISTS approved_at timestamp without time zone;
+
+-- Update payments
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS paid_at timestamp without time zone;
+
+-- RLS Policies (optional, enable for security)
+-- ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+-- etc.
+
+-- Sequences (create if missing)
+CREATE SEQUENCE IF NOT EXISTS categories_id_seq;
+CREATE SEQUENCE IF NOT EXISTS skills_id_seq;
+CREATE SEQUENCE IF NOT EXISTS reviews_id_seq;
+CREATE SEQUENCE IF NOT EXISTS reports_id_seq;
+CREATE SEQUENCE IF NOT EXISTS messages_id_seq;
+CREATE SEQUENCE IF NOT EXISTS notifications_id_seq;
+CREATE SEQUENCE IF NOT EXISTS chat_rooms_id_seq;
+CREATE SEQUENCE IF NOT EXISTS project_files_id_seq;
+
+-- Missing Tables to Complete Schema
+
+-- Reports
+CREATE TABLE IF NOT EXISTS public.reports (
+  id integer NOT NULL DEFAULT nextval('reports_id_seq'::regclass),
+  reporter_id integer,
+  reported_user_id integer,
+  project_id integer,
+  reason text,
+  status character varying DEFAULT 'pending'::character varying CHECK (status::text = ANY (ARRAY['pending'::character varying, 'resolved'::character varying, 'ignored'::character varying]::text[])),
+  created_at timestamp without time zone DEFAULT now(),
+  CONSTRAINT reports_pkey PRIMARY KEY (id),
+  CONSTRAINT reports_reporter_id_fkey FOREIGN KEY (reporter_id) REFERENCES public.users(id),
+  CONSTRAINT reports_reported_user_id_fkey FOREIGN KEY (reported_user_id) REFERENCES public.users(id),
+  CONSTRAINT reports_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
+);
+
+-- Messages
+CREATE TABLE IF NOT EXISTS public.messages (
+  id integer NOT NULL DEFAULT nextval('messages_id_seq'::regclass),
+  project_id integer,
+  sender_id integer,
+  content text NOT NULL,
+  is_read boolean DEFAULT false,
+  created_at timestamp without time zone DEFAULT now(),
+  receiver_id integer,
+
+  -- Idempotency key generated by the client for each "send" attempt.
+  -- This prevents duplicate inserts when the frontend retries/double-submits.
+  client_message_uuid uuid NOT NULL,
+
+  CONSTRAINT messages_pkey PRIMARY KEY (id),
+  CONSTRAINT messages_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id),
+  CONSTRAINT messages_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES public.users(id),
+  CONSTRAINT messages_receiver_id_fkey FOREIGN KEY (receiver_id) REFERENCES public.users(id),
+  CONSTRAINT messages_client_message_uuid_unique UNIQUE (client_message_uuid)
+);
+
+-- Notifications (if missing)
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id integer NOT NULL DEFAULT nextval('notifications_id_seq'::regclass),
+  user_id integer,
+  role character varying,
+  title character varying,
+  message text,
+  is_read boolean DEFAULT false,
+  type character varying,
+  created_at timestamp without time zone DEFAULT now(),
+  related_entity_id integer,
+  sender_id bigint,
+  sender_name text,
+
+  -- Idempotency key to prevent duplicate notifications per event.
+  -- Example: "message:<client_message_uuid>:user:<user_id>", "proposal:<proposal_id>:accepted:user:<user_id>", etc.
+  event_key text,
+
+  CONSTRAINT notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT notifications_event_key_unique UNIQUE (event_key)
+);
+
+-- Add indexes to speed notification queries and support the notification feed.
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON public.notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_type ON public.notifications(type);
+
+-- Schema now complete matching provided SQL!
