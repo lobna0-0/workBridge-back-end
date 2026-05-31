@@ -29,7 +29,7 @@ app.use('/api/payments/webhook',
     express.raw({ type: 'application/json' })
 );
 app.use(cors({
-    origin: ['http://localhost:4200', 'https://lobna0-0.github.io'],
+    origin: [''],
     credentials: true
 }));
 app.use(express.json());
