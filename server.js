@@ -29,7 +29,7 @@ app.use('/api/payments/webhook',
     express.raw({ type: 'application/json' })
 );
 app.use(cors({
-    origin: [''],
+    origin: '',
     credentials: true
 }));
 app.use(express.json());
