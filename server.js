@@ -28,8 +28,22 @@ const port = process.env.PORT || 3000;
 app.use('/api/payments/webhook',
     express.raw({ type: 'application/json' })
 );
+const allowedOrigins = [
+  'http://localhost:4200',
+  'https://lobna0-0.github.io'
+];
+
 app.use(cors({
-    origin: '*'
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // Postman / server-to-server
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
